@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "stuDY",
-    "slug": "vocabulary-app",
+    "slug": "vocabulary-app-offline",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,10 +13,12 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.yourname.vocabularyapp",
+      "bundleIdentifier": "com.yourname.vocabularyappoffline",
+      "buildNumber": "6",
       "infoPlist": {
         "NSCameraUsageDescription": "OCR 기능을 위해 카메라 접근이 필요합니다.",
-        "NSMicrophoneUsageDescription": "오디오 재생을 위해 마이크 접근이 필요합니다."
+        "NSPhotoLibraryUsageDescription": "갤러리에서 사진을 선택하기 위해 접근이 필요합니다.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -24,8 +26,13 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.yourname.vocabularyapp",
-      "permissions": ["CAMERA", "RECORD_AUDIO"]
+      "package": "com.yourname.vocabularyappoffline",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
@@ -40,12 +47,16 @@
           "icon": "./assets/notification-icon.png",
           "color": "#6366f1"
         }
+      ],
+      [
+        "expo-sqlite"
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "ec70ae5d-5744-4ff4-aa46-2080ea446ffa"
       }
-    }
+    },
+    "owner": "dohun1214"
   }
 }

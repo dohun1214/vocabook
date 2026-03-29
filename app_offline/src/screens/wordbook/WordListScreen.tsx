@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Alert, Modal, TextInput,
   RefreshControl, SafeAreaView, ActivityIndicator, TextInput as RNTextInput,
-  KeyboardAvoidingView, Platform, Switch,
+  KeyboardAvoidingView, Platform, Switch, TouchableWithoutFeedback, Animated, Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import api from '../../services/api';
+import NetInfo from '@react-native-community/netinfo';
+import * as db from '../../db/database';
 import { speak } from '../../services/tts';
 import { useTheme } from '../../theme';
 import { Word, RootStackParamList } from '../../types';
@@ -43,13 +44,14 @@ export default function WordListScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const autoPlay = useSettingsStore((s) => s.autoPlayTTS);
 
-  const fetchWords = useCallback(async () => {
+  const fetchWords = useCallback(() => {
     try {
-      const params: Record<string, string> = { sortBy: sort, order: 'desc' };
-      if (search) params.search = search;
-      if (filter === 'favorite') params.isFavorite = 'true';
-      const { data } = await api.get(`/wordbooks/${wordbookId}/words`, { params });
-      setWords(data.words);
+      const data = db.getWords(wordbookId, {
+        search: search || undefined,
+        isFavorite: filter === 'favorite' ? true : undefined,
+        sortBy: sort,
+      });
+      setWords(data);
     } catch {
       Alert.alert('오류', '단어를 불러오지 못했습니다');
     } finally {
@@ -81,17 +83,16 @@ export default function WordListScreen() {
     setWordModal(true);
   }
 
-  async function handleSaveWord() {
+  function handleSaveWord() {
     if (!wordInput.trim() || !meaningInput.trim()) {
       return Alert.alert('오류', '단어와 뜻을 입력해주세요');
     }
     setSaving(true);
     try {
-      const body = { word: wordInput.trim(), meaning: meaningInput.trim(), example: exampleInput.trim() || undefined };
       if (editTarget) {
-        await api.put(`/words/${editTarget.id}`, body);
+        db.updateWord(editTarget.id, wordInput.trim(), meaningInput.trim(), exampleInput.trim() || undefined);
       } else {
-        await api.post(`/wordbooks/${wordbookId}/words`, body);
+        db.createWord(wordbookId, wordInput.trim(), meaningInput.trim(), exampleInput.trim() || undefined);
       }
       setWordModal(false);
       fetchWords();
@@ -102,25 +103,25 @@ export default function WordListScreen() {
     }
   }
 
-  async function handleDelete(w: Word) {
+  function handleDelete(w: Word) {
     Alert.alert('단어 삭제', `"${w.word}"을(를) 삭제할까요?`, [
       { text: '취소', style: 'cancel' },
-      { text: '삭제', style: 'destructive', onPress: async () => {
-        try { await api.delete(`/words/${w.id}`); fetchWords(); }
+      { text: '삭제', style: 'destructive', onPress: () => {
+        try { db.deleteWord(w.id); fetchWords(); }
         catch { Alert.alert('오류', '삭제에 실패했습니다'); }
       }},
     ]);
   }
 
-  async function toggleFavorite(w: Word) {
+  function toggleFavorite(w: Word) {
     try {
-      await api.patch(`/words/${w.id}/favorite`, { isFavorite: !w.isFavorite });
+      db.setFavorite(w.id, !w.isFavorite);
       setWords((prev) => prev.map((x) => x.id === w.id ? { ...x, isFavorite: !x.isFavorite } : x));
     } catch {}
   }
 
   async function handleScan() {
-    Alert.alert('사진으로 단어 추가', '방법을 선택해주세요', [
+    Alert.alert('사진으로 단어 추가', '방법을 선택해주세요.', [
       { text: '취소', style: 'cancel' },
       { text: '갤러리에서 선택', onPress: handlePickFromGallery },
       { text: '카메라로 촬영', onPress: handleOpenCamera },
@@ -148,10 +149,19 @@ export default function WordListScreen() {
 
     setScanLoading(true);
     try {
-      await processImageWithGemini(result.assets[0].base64);
+      await checkNetworkAndProcess(result.assets[0].base64);
     } finally {
       setScanLoading(false);
     }
+  }
+
+  async function checkNetworkAndProcess(base64: string) {
+    const state = await NetInfo.fetch();
+    if (!state.isConnected) {
+      Alert.alert('인터넷 연결 필요', 'OCR 기능은 인터넷 연결이 필요합니다.\n와이파이 또는 모바일 데이터를 켜주세요.');
+      return;
+    }
+    await processImageWithGemini(base64);
   }
 
   async function processImageWithGemini(base64: string) {
@@ -192,9 +202,9 @@ JSON:` },
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: true });
       if (!photo?.base64) return;
       setShowCamera(false);
-      await processImageWithGemini(photo.base64);
-    } catch {
-      Alert.alert('오류', 'OCR 처리에 실패했습니다');
+      await checkNetworkAndProcess(photo.base64);
+    } catch (e: any) {
+      Alert.alert('오류', String(e?.message ?? 'OCR 처리에 실패했습니다'));
     } finally {
       setScanLoading(false);
     }
@@ -202,43 +212,19 @@ JSON:` },
 
   function renderWord({ item }: { item: Word }) {
     return (
-      <TouchableOpacity
-        style={{
-          backgroundColor: c.card,
-          borderRadius: 14, padding: 16,
-          marginHorizontal: 16, marginVertical: 5,
-          shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
-        }}
-        onPress={() => speak(item.word)}
-        onLongPress={() =>
-          Alert.alert(item.word, '무엇을 하시겠어요?', [
-            { text: '취소', style: 'cancel' },
-            { text: '수정', onPress: () => openEdit(item) },
-            { text: '삭제', style: 'destructive', onPress: () => handleDelete(item) },
-          ])
-        }
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => toggleFavorite(item)} style={{ marginRight: 10 }}>
-            <Text style={{ fontSize: 20, color: item.isFavorite ? '#f59e0b' : c.starEmpty }}>★</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: c.textPrimary }}>{item.word}</Text>
-            {showMeaning && (
-              <Text style={{ fontSize: 14, color: c.textTertiary, flexShrink: 1, marginLeft: 8, textAlign: 'right' }} numberOfLines={2}>
-                {item.meaning}
-              </Text>
-            )}
-          </View>
-        </View>
-      </TouchableOpacity>
+      <WordItem
+        item={item}
+        showMeaning={showMeaning}
+        c={c}
+        onToggleFavorite={toggleFavorite}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+      />
     );
   }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.background }}>
-      {/* Search bar */}
       <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
         <TextInput
           value={search}
@@ -253,7 +239,6 @@ JSON:` },
         />
       </View>
 
-      {/* Filter & Sort row */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 6 }}>
         <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
           {(['all', 'favorite'] as const).map((f) => (
@@ -292,23 +277,21 @@ JSON:` },
           renderItem={renderWord}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchWords(); }} tintColor="#6366f1" />}
           ListEmptyComponent={
-            <View style={{ alignItems: 'center', paddingTop: 60 }}>
-              <Text style={{ fontSize: 40, marginBottom: 12 }}>📝</Text>
+            <View style={{ alignItems: 'center', paddingTop: 130 }}>
+              <Image source={require('../../../assets/cloud.png')} style={{ width: 48, height: 48, marginBottom: 12 }} resizeMode="contain" />
               <Text style={{ color: c.textMuted, fontSize: 15, textAlign: 'center' }}>
-                단어가 없습니다{'\n'}아래 버튼으로 추가해보세요
+                단어가 없습니다.{'\n'}아래 버튼으로 추가해보세요.
               </Text>
             </View>
           }
         />
       )}
 
-      {/* Bottom action buttons */}
       <View style={{ flexDirection: 'row', padding: 16, gap: 10, backgroundColor: c.card, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Button title="사진으로 추가" variant="outline" onPress={handleScan} style={{ flex: 1, paddingVertical: 12 }} />
+        <Button title="사진으로 추가" variant="outline" onPress={handleScan} style={{ flex: 1, paddingVertical: 12 }} loading={scanLoading} />
         <Button title="+ 단어 추가" onPress={openCreate} style={{ flex: 2, paddingVertical: 12 }} />
       </View>
 
-      {/* Camera Modal */}
       <Modal visible={showCamera} animationType="slide">
         <View style={{ flex: 1, backgroundColor: '#000' }}>
           <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back">
@@ -322,13 +305,14 @@ JSON:` },
         </View>
       </Modal>
 
-      {/* Add/Edit Word Modal */}
       <Modal visible={wordModal} transparent animationType="slide">
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          <TouchableWithoutFeedback onPress={() => setWordModal(false)}>
           <View style={{ flex: 1, backgroundColor: c.modalOverlay, justifyContent: 'flex-end' }}>
+            <TouchableWithoutFeedback onPress={() => {}}>
             <View style={{ backgroundColor: c.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
               <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 16, color: c.textPrimary }}>
                 {editTarget ? '단어 수정' : '단어 추가'}
@@ -363,9 +347,105 @@ JSON:` },
                 <Button title={editTarget ? '수정' : '추가'} onPress={handleSaveWord} loading={saving} style={{ flex: 1 }} />
               </View>
             </View>
+            </TouchableWithoutFeedback>
           </View>
+          </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+type WordItemProps = {
+  item: Word;
+  showMeaning: boolean;
+  c: ReturnType<typeof useTheme>;
+  onToggleFavorite: (w: Word) => void;
+  onEdit: (w: Word) => void;
+  onDelete: (w: Word) => void;
+};
+
+function WordItem({ item, showMeaning, c, onToggleFavorite, onEdit, onDelete }: WordItemProps) {
+  const [revealed, setRevealed] = useState(false);
+  const [showContent, setShowContent] = useState(false);
+  const wordOpacity = useRef(new Animated.Value(1)).current;
+  const meaningOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (showMeaning) {
+      wordOpacity.setValue(1);
+      meaningOpacity.setValue(0);
+      setShowContent(false);
+      setRevealed(false);
+    }
+  }, [showMeaning]);
+
+  function handlePress() {
+    if (showMeaning) {
+      speak(item.word);
+      return;
+    }
+    if (!revealed) {
+      speak(item.word);
+      setRevealed(true);
+      setShowContent(true);
+      Animated.parallel([
+        Animated.timing(wordOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(meaningOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+      ]).start();
+    } else {
+      setRevealed(false);
+      Animated.parallel([
+        Animated.timing(wordOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+        Animated.timing(meaningOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+      ]).start(() => setShowContent(false));
+    }
+  }
+
+  return (
+    <TouchableOpacity
+      style={{
+        backgroundColor: revealed ? '#ede9fe' : c.card,
+        borderRadius: 14, padding: 16,
+        marginHorizontal: 16, marginVertical: 5,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+      }}
+      onPress={handlePress}
+      onLongPress={() =>
+        Alert.alert(item.word, '무엇을 하시겠어요?', [
+          { text: '취소', style: 'cancel' },
+          { text: '수정', onPress: () => onEdit(item) },
+          { text: '삭제', style: 'destructive', onPress: () => onDelete(item) },
+        ])
+      }
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <TouchableOpacity onPress={() => onToggleFavorite(item)} style={{ marginRight: 10 }}>
+          <Text style={{ fontSize: 20, color: item.isFavorite ? '#f59e0b' : c.starEmpty }}>★</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1, height: 22, justifyContent: 'center' }}>
+          <Animated.Text
+            style={{ position: 'absolute', fontSize: 16, fontWeight: '700', color: c.textPrimary, opacity: wordOpacity }}
+            numberOfLines={1}
+          >
+            {item.word}
+          </Animated.Text>
+          {showMeaning && (
+            <Text style={{ position: 'absolute', right: 0, fontSize: 14, color: c.textTertiary, maxWidth: '60%', textAlign: 'right' }} numberOfLines={2}>
+              {item.meaning}
+            </Text>
+          )}
+          {!showMeaning && showContent && (
+            <Animated.Text
+              style={{ position: 'absolute', fontSize: 14, fontWeight: '600', color: '#6366f1', opacity: meaningOpacity }}
+              numberOfLines={2}
+            >
+              {item.meaning}
+            </Animated.Text>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
   );
 }

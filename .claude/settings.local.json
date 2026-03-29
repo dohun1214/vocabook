@@ -4,7 +4,10 @@
       "Bash(npm install:*)",
       "Bash(npx tsc:*)",
       "Bash(npm run:*)",
-      "Bash(npx prisma:*)"
+      "Bash(npx prisma:*)",
+      "Bash(npx expo:*)",
+      "Bash(cp -r \"c:/Users/dohun/Desktop/vocabulary_list/app/assets/.\" \"c:/Users/dohun/Desktop/vocabulary_list/app_offline/assets/\")",
+      "Bash(cp -r \"c:/Users/dohun/Desktop/vocabulary_list/app/src/assets/.\" \"c:/Users/dohun/Desktop/vocabulary_list/app_offline/src/assets/\")"
     ]
   }
 }
