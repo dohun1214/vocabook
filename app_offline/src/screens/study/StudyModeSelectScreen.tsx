@@ -29,7 +29,14 @@ export default function StudyModeSelectScreen() {
 
   function startFlashcard() {
     if (words.length === 0) return Alert.alert('단어 없음', '암기할 단어가 없습니다');
-    navigation.navigate('Flashcard', { words, mode: 'study' });
+    Alert.alert('단어 순서', '학습 순서를 선택해주세요', [
+      { text: '취소', style: 'cancel' },
+      { text: '순서대로', onPress: () => navigation.navigate('Flashcard', { words, mode: 'study' }) },
+      { text: '랜덤', onPress: () => {
+        const shuffled = [...words].sort(() => Math.random() - 0.5);
+        navigation.navigate('Flashcard', { words: shuffled, mode: 'study' });
+      }},
+    ]);
   }
 
   function startQuizMultiple() {

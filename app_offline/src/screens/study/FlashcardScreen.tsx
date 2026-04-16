@@ -168,7 +168,7 @@ export default function FlashcardScreen() {
           onPress={() => speak(currentWord.word)}
           style={{ marginTop: 48, padding: 16 }}
         >
-          <Image source={require('../../assets/speaker.png')} style={{ width: 52, height: 52, tintColor: isFlipped ? '#6366f1' : undefined }} />
+          <Image source={require('../../assets/speaker.png')} style={{ width: 52, height: 52, tintColor: isFlipped ? '#6366f1' : c.textSecondary }} />
         </TouchableOpacity>
       </View>
 

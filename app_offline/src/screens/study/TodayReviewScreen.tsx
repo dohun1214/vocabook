@@ -13,6 +13,7 @@ import Button from '../../components/Button';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const DAILY_REVIEW_KEY = '@daily_review';
+const DAILY_HISTORY_KEY = '@daily_review_history';
 
 function seededShuffle<T>(arr: T[], seed: number): T[] {
   const result = [...arr];
@@ -45,33 +46,56 @@ export default function TodayReviewScreen() {
     try {
       const allWords = db.getAllWords();
 
-      let dailyIds: number[] | null = null;
-      try {
-        const cached = await AsyncStorage.getItem(DAILY_REVIEW_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed.date === today && parsed.wordIds?.length > 0) {
-            dailyIds = parsed.wordIds;
+      // 오늘 이미 생성된 목록이 있으면 그대로 사용
+      const cached = await AsyncStorage.getItem(DAILY_REVIEW_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.date === today && parsed.wordIds?.length > 0) {
+          const wordMap = new Map(allWords.map((w) => [w.id, w]));
+          const daily = parsed.wordIds.map((id: number) => wordMap.get(id)).filter(Boolean) as Word[];
+          if (daily.length > 0) {
+            setWords(daily);
+            setLoading(false);
+            return;
           }
         }
+      }
+
+      // 새 날짜 — 이전 날 단어를 히스토리에 추가
+      let history: number[] = [];
+      try {
+        const historyRaw = await AsyncStorage.getItem(DAILY_HISTORY_KEY);
+        if (historyRaw) history = JSON.parse(historyRaw);
       } catch {}
 
-      if (dailyIds) {
-        const wordMap = new Map(allWords.map((w) => [w.id, w]));
-        const daily = dailyIds.map((id) => wordMap.get(id)).filter(Boolean) as Word[];
-        if (daily.length > 0) {
-          setWords(daily);
-          setLoading(false);
-          return;
-        }
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed.wordIds?.length > 0) {
+            history = [...new Set([...history, ...parsed.wordIds])];
+          }
+        } catch {}
+      }
+
+      // 히스토리에 없는 단어만 후보로
+      const historySet = new Set(history);
+      let candidates = allWords.filter((w) => !historySet.has(w.id));
+
+      // 후보가 부족하면 히스토리 초기화 후 전체 사용
+      if (candidates.length < Math.min(20, allWords.length)) {
+        history = [];
+        candidates = allWords;
       }
 
       const seed = parseInt(today.replace(/-/g, ''), 10);
-      const shuffled = seededShuffle(allWords, seed);
+      const shuffled = seededShuffle(candidates, seed);
       const daily = shuffled.slice(0, Math.min(20, shuffled.length));
+
       if (daily.length > 0) {
         await AsyncStorage.setItem(DAILY_REVIEW_KEY, JSON.stringify({ date: today, wordIds: daily.map((w) => w.id) }));
+        await AsyncStorage.setItem(DAILY_HISTORY_KEY, JSON.stringify(history));
       }
+
       setWords(daily);
     } catch {}
 

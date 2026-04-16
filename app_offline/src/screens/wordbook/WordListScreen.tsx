@@ -38,9 +38,13 @@ export default function WordListScreen() {
   const [exampleInput, setExampleInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [showMeaning, setShowMeaning] = useState(true);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showCamera, setShowCamera] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const cameraRef = useRef<CameraView>(null);
+  const meaningInputRef = useRef<RNTextInput>(null);
+  const exampleInputRef = useRef<RNTextInput>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const autoPlay = useSettingsStore((s) => s.autoPlayTTS);
 
@@ -70,6 +74,49 @@ export default function WordListScreen() {
   useEffect(() => {
     navigation.setOptions({ title: wordbookName });
   }, [wordbookName, navigation]);
+
+  function enterSelectMode() {
+    setSelectMode(true);
+    setSelectedIds(new Set());
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === words.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(words.map((w) => w.id)));
+    }
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    Alert.alert('단어 삭제', `선택한 ${selectedIds.size}개의 단어를 삭제할까요?`, [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: () => {
+        try {
+          selectedIds.forEach((id) => db.deleteWord(id));
+          exitSelectMode();
+          fetchWords();
+        } catch {
+          Alert.alert('오류', '삭제에 실패했습니다');
+        }
+      }},
+    ]);
+  }
 
   function openCreate() {
     setEditTarget(null);
@@ -219,6 +266,9 @@ JSON:` },
         onToggleFavorite={toggleFavorite}
         onEdit={openEdit}
         onDelete={handleDelete}
+        selectMode={selectMode}
+        isSelected={selectedIds.has(item.id)}
+        onSelect={toggleSelect}
       />
     );
   }
@@ -240,32 +290,50 @@ JSON:` },
       </View>
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 6 }}>
-        <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-          {(['all', 'favorite'] as const).map((f) => (
-            <TouchableOpacity key={f} onPress={() => setFilter(f)}
-              style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: filter === f ? '#6366f1' : c.chipBg }}>
-              <Text style={{ fontSize: 13, color: filter === f ? '#fff' : c.chipText, fontWeight: '500' }}>
-                {f === 'all' ? '전체' : '즐겨찾기'}
+        {selectMode ? (
+          <>
+            <TouchableOpacity onPress={toggleSelectAll}
+              style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: selectedIds.size === words.length ? '#6366f1' : c.chipBg }}>
+              <Text style={{ fontSize: 13, color: selectedIds.size === words.length ? '#fff' : c.chipText, fontWeight: '500' }}>
+                전체 선택
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: c.textSecondary, marginRight: -8 }}>뜻 보기</Text>
-          <Switch
-            value={showMeaning}
-            onValueChange={setShowMeaning}
-            trackColor={{ false: c.switchTrackFalse, true: '#6366f1' }}
-            thumbColor="#fff"
-            style={{ transform: [{ scaleX: 0.7 }, { scaleY: 0.7 }] }}
-          />
-          <TouchableOpacity onPress={() => setSort(sort === 'createdAt' ? 'word' : 'createdAt')}
-            style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, backgroundColor: c.chipBg }}>
-            <Text style={{ fontSize: 12, color: c.chipText, fontWeight: '500' }}>
-              {sort === 'createdAt' ? '최근순' : '이름순'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            <Text style={{ fontSize: 13, color: c.textSecondary }}>{selectedIds.size}개 선택됨</Text>
+          </>
+        ) : (
+          <>
+            <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+              {(['all', 'favorite'] as const).map((f) => (
+                <TouchableOpacity key={f} onPress={() => setFilter(f)}
+                  style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: filter === f ? '#6366f1' : c.chipBg }}>
+                  <Text style={{ fontSize: 13, color: filter === f ? '#fff' : c.chipText, fontWeight: '500' }}>
+                    {f === 'all' ? '전체' : '즐겨찾기'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+              <Text style={{ fontSize: 12, color: c.textSecondary, marginRight: -8 }}>뜻 보기</Text>
+              <Switch
+                value={showMeaning}
+                onValueChange={setShowMeaning}
+                trackColor={{ false: c.switchTrackFalse, true: '#6366f1' }}
+                thumbColor="#fff"
+                style={{ transform: [{ scaleX: 0.7 }, { scaleY: 0.7 }] }}
+              />
+              <TouchableOpacity onPress={() => setSort(sort === 'createdAt' ? 'word' : 'createdAt')}
+                style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, backgroundColor: c.chipBg }}>
+                <Text style={{ fontSize: 12, color: c.chipText, fontWeight: '500' }}>
+                  {sort === 'createdAt' ? '최근순' : '이름순'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={enterSelectMode}
+                style={{ paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, backgroundColor: c.chipBg }}>
+                <Text style={{ fontSize: 12, color: c.chipText, fontWeight: '500' }}>선택</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
 
       {loading ? (
@@ -288,8 +356,21 @@ JSON:` },
       )}
 
       <View style={{ flexDirection: 'row', padding: 16, gap: 10, backgroundColor: c.card, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Button title="사진으로 추가" variant="outline" onPress={handleScan} style={{ flex: 1, paddingVertical: 12 }} loading={scanLoading} />
-        <Button title="+ 단어 추가" onPress={openCreate} style={{ flex: 2, paddingVertical: 12 }} />
+        {selectMode ? (
+          <>
+            <Button title="취소" variant="secondary" onPress={exitSelectMode} style={{ flex: 1, paddingVertical: 12 }} />
+            <Button
+              title={selectedIds.size > 0 ? `삭제 (${selectedIds.size}개)` : '삭제'}
+              onPress={handleBulkDelete}
+              style={{ flex: 2, paddingVertical: 12, backgroundColor: selectedIds.size > 0 ? '#ef4444' : undefined }}
+            />
+          </>
+        ) : (
+          <>
+            <Button title="사진으로 추가" variant="outline" onPress={handleScan} style={{ flex: 1, paddingVertical: 12 }} loading={scanLoading} />
+            <Button title="+ 단어 추가" onPress={openCreate} style={{ flex: 2, paddingVertical: 12 }} />
+          </>
+        )}
       </View>
 
       <Modal visible={showCamera} animationType="slide">
@@ -325,15 +406,23 @@ JSON:` },
                 style={{ borderWidth: 1.5, borderColor: c.inputBorder, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginBottom: 10, color: c.textPrimary, backgroundColor: c.inputBg }}
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => meaningInputRef.current?.focus()}
+                blurOnSubmit={false}
               />
               <TextInput
+                ref={meaningInputRef}
                 value={meaningInput}
                 onChangeText={setMeaningInput}
                 placeholder="뜻 (한국어 또는 영어)"
                 placeholderTextColor={c.placeholder}
                 style={{ borderWidth: 1.5, borderColor: c.inputBorder, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, marginBottom: 10, color: c.textPrimary, backgroundColor: c.inputBg }}
+                returnKeyType="next"
+                onSubmitEditing={() => exampleInputRef.current?.focus()}
+                blurOnSubmit={false}
               />
               <TextInput
+                ref={exampleInputRef}
                 value={exampleInput}
                 onChangeText={setExampleInput}
                 placeholder="예문 (선택사항)"
@@ -363,9 +452,12 @@ type WordItemProps = {
   onToggleFavorite: (w: Word) => void;
   onEdit: (w: Word) => void;
   onDelete: (w: Word) => void;
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onSelect?: (id: number) => void;
 };
 
-function WordItem({ item, showMeaning, c, onToggleFavorite, onEdit, onDelete }: WordItemProps) {
+function WordItem({ item, showMeaning, c, onToggleFavorite, onEdit, onDelete, selectMode, isSelected, onSelect }: WordItemProps) {
   const [revealed, setRevealed] = useState(false);
   const [showContent, setShowContent] = useState(false);
   const wordOpacity = useRef(new Animated.Value(1)).current;
@@ -405,14 +497,16 @@ function WordItem({ item, showMeaning, c, onToggleFavorite, onEdit, onDelete }: 
   return (
     <TouchableOpacity
       style={{
-        backgroundColor: revealed ? '#ede9fe' : c.card,
+        backgroundColor: isSelected ? '#ede9fe' : revealed ? '#ede9fe' : c.card,
         borderRadius: 14, padding: 16,
         marginHorizontal: 16, marginVertical: 5,
         shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+        borderWidth: isSelected ? 1.5 : 0,
+        borderColor: isSelected ? '#6366f1' : 'transparent',
       }}
-      onPress={handlePress}
-      onLongPress={() =>
+      onPress={selectMode ? () => onSelect?.(item.id) : handlePress}
+      onLongPress={selectMode ? undefined : () =>
         Alert.alert(item.word, '무엇을 하시겠어요?', [
           { text: '취소', style: 'cancel' },
           { text: '수정', onPress: () => onEdit(item) },
@@ -421,9 +515,20 @@ function WordItem({ item, showMeaning, c, onToggleFavorite, onEdit, onDelete }: 
       }
     >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <TouchableOpacity onPress={() => onToggleFavorite(item)} style={{ marginRight: 10 }}>
-          <Text style={{ fontSize: 20, color: item.isFavorite ? '#f59e0b' : c.starEmpty }}>★</Text>
-        </TouchableOpacity>
+        {selectMode ? (
+          <View style={{
+            width: 22, height: 22, borderRadius: 11, marginRight: 10,
+            borderWidth: 2, borderColor: isSelected ? '#6366f1' : c.border,
+            backgroundColor: isSelected ? '#6366f1' : 'transparent',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isSelected && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>✓</Text>}
+          </View>
+        ) : (
+          <TouchableOpacity onPress={() => onToggleFavorite(item)} style={{ marginRight: 10 }}>
+            <Text style={{ fontSize: 20, color: item.isFavorite ? '#f59e0b' : c.starEmpty }}>★</Text>
+          </TouchableOpacity>
+        )}
         <View style={{ flex: 1, height: 22, justifyContent: 'center' }}>
           <Animated.Text
             style={{ position: 'absolute', fontSize: 16, fontWeight: '700', color: c.textPrimary, opacity: wordOpacity }}
